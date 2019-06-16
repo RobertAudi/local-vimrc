@@ -1,23 +1,31 @@
-" vam#DefineAndBind('s:c','g:local_vimrc','{}')
-if !exists('g:local_vimrc') | let g:local_vimrc = {} | endif | let s:c = g:local_vimrc
-
-" using .vimrc because most systems support local and user global
-" configuration files. They rarely differ in name.
-" Users will instantly understand what it does.
-let s:c.names = get(s:c, 'names', ['.vimrc'])
-let s:c.overwriter_names = get(s:c, 'overwriter_names', ['.overwrite.vimrc'])
-
-let s:c.hash_fun = get(s:c,'hash_fun','LVRHashOfFile')
-let s:c.cache_file = get(s:c,'cache_file', $HOME.'/.vim_local_rc_cache')
-let s:c.resource_on_cwd_change = get(s:c, 'resource_on_cwd_change', 1)
 let s:last_cwd = ''
-let s:c.implementations = get(s:c, 'implementations', ['sha512sum', 'sha256sum', 'sha1sum', 'md5sum', 'viml'])
-let s:c.ignore = get(s:c, 'ignore', [])
+
+fun! s:init()
+  if get(s:, 'local_vimrc_did_init', 0)
+    return
+  endif
+
+  if !exists('g:local_vimrc') | let g:local_vimrc = {} | endif
+
+  " using .vimrc because most systems support local and user global
+  " configuration files. They rarely differ in name.
+  " Users will instantly understand what it does.
+  let g:local_vimrc.names = get(g:local_vimrc, 'names', ['.vimrc'])
+  let g:local_vimrc.overwriter_names = get(g:local_vimrc, 'overwriter_names', ['.overwrite.vimrc'])
+
+  let g:local_vimrc.hash_fun = get(g:local_vimrc,'hash_fun','LVRHashOfFile')
+  let g:local_vimrc.cache_file = get(g:local_vimrc,'cache_file', $HOME.'/.vim_local_rc_cache')
+  let g:local_vimrc.resource_on_cwd_change = get(g:local_vimrc, 'resource_on_cwd_change', 1)
+  let g:local_vimrc.implementations = get(g:local_vimrc, 'implementations', ['sha512sum', 'sha256sum', 'sha1sum', 'md5sum', 'viml'])
+  let g:local_vimrc.ignore = get(g:local_vimrc, 'ignore', [])
+
+  let s:local_vimrc_did_init = 1
+endfun
 
 " very simple hash function using md5 falling back to VimL implementation
 fun! LVRHashOfFile(file, seed)
 
-  for i in s:c.implementations
+  for i in g:local_vimrc.implementations
     if i == 'viml'
       let s = join(readfile(a:file,"\n"))
       " poor mans hash function. I don't expect it to be very secure.
@@ -40,13 +48,13 @@ fun! LVRSource(file, cache)
   " always ignore user global .vimrc which Vim sources on startup:
   if p == expand("~/.vimrc") | return | endif
 
-  if !empty(s:c.ignore)
-    for i in s:c.ignore
+  if !empty(g:local_vimrc.ignore)
+    for i in g:local_vimrc.ignore
       if p =~ expand(i) | return | endif
     endfor
   endif
 
-  let h = call(function(s:c.hash_fun), [a:file, a:cache.seed])
+  let h = call(function(g:local_vimrc.hash_fun), [a:file, a:cache.seed])
   " if hash doesn't match or no hash exists ask user to confirm sourcing this file
   if get(a:cache, p, 'no-hash') == h
     let a:cache[p] = h
@@ -66,12 +74,12 @@ endf
 fun! LVRWithCache(F, args)
   " for each computer use different unique seed based on time so that its
   " harder to find collisions
-  let cache = filereadable(s:c.cache_file)
-        \ ? eval(readfile(s:c.cache_file)[0])
+  let cache = filereadable(g:local_vimrc.cache_file)
+        \ ? eval(readfile(g:local_vimrc.cache_file)[0])
         \ : {'seed':localtime()}
   let c = copy(cache)
   let r = call(a:F, [cache]+a:args)
-  if c != cache | call writefile([string(cache)], s:c.cache_file) | endif
+  if c != cache | call writefile([string(cache)], g:local_vimrc.cache_file) | endif
   return r
 endf
 
@@ -97,31 +105,33 @@ fun! LVRRecurseUp(cache, dir, names)
 endf
 
 " find and source files on vim startup:
-command! SourceLocalVimrc call LVRWithCache('LVRRecurseUp', [getcwd(), s:c.names] )
+command! SourceLocalVimrc call LVRWithCache('LVRRecurseUp', [getcwd(), g:local_vimrc.names] )
 command! SourceLocalVimrcOnce
-    \ if s:c.resource_on_cwd_change && s:last_cwd != getcwd()
-    \ | call LVRWithCache('LVRRecurseUp', [getcwd(), s:c.names] )
+    \ if g:local_vimrc.resource_on_cwd_change && s:last_cwd != getcwd()
+    \ | call LVRWithCache('LVRRecurseUp', [getcwd(), g:local_vimrc.names] )
     \ | endif
 
 " if its you writing a file update hash automatically
 fun! LVRUpdateCache(cache)
   let f = expand('%:p')
-  let a:cache[f] = call(function(s:c.hash_fun), [f, a:cache.seed])
+  let a:cache[f] = call(function(g:local_vimrc.hash_fun), [f, a:cache.seed])
 endf
 
 augroup LOCAL_VIMRC
+  autocmd!
+
   " If the current file is a local .vimrc file and you're writing it
   " automatically update the cache
-  autocmd BufWritePost * if index(s:c.names, expand('%:t')) >= 0 | call LVRWithCache('LVRUpdateCache', [] ) | endif
+  autocmd BufWritePost * call s:init() | if index(g:local_vimrc.names, expand('%:t')) >= 0 | call LVRWithCache('LVRUpdateCache', [] ) | endif
 
   " If autochdir is not set, then resource local vimrc files if current
   " directory has changed. There is no event for signaling change of current
   " directory - so this is only an approximation to what people might expect.
   " Idle events and the like would be an alternative
   if ! &autochdir
-    autocmd BufNewFile,BufRead * SourceLocalVimrcOnce
+    autocmd BufNewFile,BufRead * call s:init() | SourceLocalVimrcOnce
   endif
 
-  autocmd VimEnter * SourceLocalVimrcOnce
-  autocmd VimEnter,BufNewFile,BufRead * call LVRWithCache('LVRRecurseUp', [getcwd(), s:c.overwriter_names] )
+  autocmd VimEnter * call s:init() | SourceLocalVimrcOnce
+  autocmd VimEnter,BufNewFile,BufRead * call s:init() | call LVRWithCache('LVRRecurseUp', [getcwd(), g:local_vimrc.overwriter_names] )
 augroup end
