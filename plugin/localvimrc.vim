@@ -12,6 +12,7 @@ let s:c.cache_file = get(s:c,'cache_file', $HOME.'/.vim_local_rc_cache')
 let s:c.resource_on_cwd_change = get(s:c, 'resource_on_cwd_change', 1)
 let s:last_cwd = ''
 let s:c.implementations = get(s:c, 'implementations', ['sha512sum', 'sha256sum', 'sha1sum', 'md5sum', 'viml'])
+let s:c.ignore = get(s:c, 'ignore', [])
 
 " very simple hash function using md5 falling back to VimL implementation
 fun! LVRHashOfFile(file, seed)
@@ -34,10 +35,17 @@ endfun
 
 " source local vimrc, ask user for confirmation if file contents change
 fun! LVRSource(file, cache)
-  " always ignore user global .vimrc which Vim sources on startup:
-  if expand(a:file) == expand("~/.vimrc") | return | endif
-
   let p = expand(a:file)
+
+  " always ignore user global .vimrc which Vim sources on startup:
+  if p == expand("~/.vimrc") | return | endif
+
+  if !empty(s:c.ignore)
+    for i in s:c.ignore
+      if p =~ expand(i) | return | endif
+    endfor
+  endif
+
   let h = call(function(s:c.hash_fun), [a:file, a:cache.seed])
   " if hash doesn't match or no hash exists ask user to confirm sourcing this file
   if get(a:cache, p, 'no-hash') == h
